@@ -10,7 +10,7 @@ BLD_ARCH=x86
 # 
 # Define various build system definitions for use while building.
 #
-BLD_ROOT=$(PRJ_ROOT)/../out/$(BLD_ARCH)
+BLD_ROOT=$(PRJ_ROOT)/../bld/$(BLD_ARCH)
 BLD_OUT=$(BLD_ROOT)/$(CUR_PATH)
 CONF_ROOT=$(PRJ_ROOT)/conf
 
