@@ -1,0 +1,41 @@
+# 
+# The build is split into many phases to satisfy dependencies.
+#   
+#   bld_stage_clean:
+#     - Removes all build data.
+#
+#   bld_stage_init:
+#     - Builds target folders, provisions libs.
+#
+#   bld_stage_build:
+#     - Builds the repository tree.
+#
+#   bld_stage_package:
+#     - Creates appropriate execution layout.
+# 
+
+# 
+# Invoke the appropriate build stages.
+#
+.PHONY: all
+all: package
+	echo post_all
+
+.PHONY: clean
+clean: bld_stage_clean
+	echo post_clean
+
+.PHONY: build
+build: bld_stage_init bld_stage_build
+	echo post_build
+
+.PHONY: package
+package: build bld_stage_package
+	echo post_package
+
+# 
+# Include the appropriate environment type for processing.
+#
+include $(CONF_ROOT)/bld.env.$(BLD_TYPE).mk
+
+

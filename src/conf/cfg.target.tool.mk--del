@@ -1,0 +1,43 @@
+# 
+# The build is split into many phases to satisfy dependencies.
+#   
+#   bld_stage_clean:
+#     - Removes all build data.
+#
+#   bld_stage_init:
+#     - Builds target folders, provisions libs.
+#
+#   bld_stage_tools:
+#     - Builds and provisions toolchain utilities.
+# 
+#   bld_stage_build:
+#     - Builds the repository tree.
+#
+#   bld_stage_package:
+#     - Creates appropriate execution layout.
+# 
+
+# 
+# Define a template to create rules for each build stage per target directory.
+# 
+bld_stage_clean:
+	rm $(BLD_TARGET_OUT)/*.o
+
+bld_stage_init:
+	md $(BLD_TARGET_OUT)
+
+bld_stage_tools: $(TARGET_LIST)
+	
+
+bld_stage_build:
+	echo Stage Build $(1)
+	echo ---NOP---
+
+bld_stage_package:
+	echo Stage Package $(1)
+
+
+$(BLD_TARGET_OUT)/%.o: %.c
+	$(TOOL_CC) -c $(CFLAGS) $< -o $@
+
+	
