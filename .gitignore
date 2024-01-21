@@ -2,4 +2,7 @@
 # Ignore build system outputs
 # 
 bld/
+*~
+*.swp
+*.swb
 
