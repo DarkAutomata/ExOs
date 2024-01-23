@@ -56,8 +56,24 @@
 
 ; Moden Control Register
 %define COM1_REG_MCR        (COM1_PORT + 4)
+%define COM1_REG_MCR_F_DTR  0x01
+%define COM1_REG_MCR_F_RTS  0x02
+%define COM1_REG_MCR_AUX1   0x04
+%define COM1_REG_MCR_AUX2   0x08
+%define COM1_REG_MCR_LOOP   0x10
+%define COM1_REG_MCR_AFM    0x20
+
 ; Line Status Register
 %define COM1_REG_LSR        (COM1_PORT + 5)
+%define COM1_REG_LSR_DRDY   0x01
+%define COM1_REG_LSR_E_OVR  0x02
+%define COM1_REG_LSR_E_PAR  0x04
+%define COM1_REG_LSR_E_FRM  0x08
+%define COM1_REG_LSR_I_BRK  0x10
+%define COM1_REG_LSR_S_ETX  0x20
+%define COM1_REG_LSR_s_EDH  0x40
+%define COM1_REG_LSR_E_FFO  0x80
+
 ; Modem Status Register
 %define COM1_REG_MSR        (COM1_PORT + 6)
 ; Scratch Register
@@ -131,22 +147,113 @@ boot:
     sti
     
     ; Configure COM1 for 8N1 @ 115200 baud, then wait for boot upload.
-    OUTB    COM1_REG_IER, 0     ; Disable interrupts.
-    OUTB    COM1_REG_LCR, COM1_REG_LCR_DLAB     ; Switch to DLAB mode.
-    OUTB    COM1_REG_DLAB_0, 1  ; Divisor = 1 (115200 baud)
+    ; Disable interrupts.
+    OUTB    COM1_REG_IER, 0
+    ; Set DLAB mode.
+    OUTB    COM1_REG_LCR, COM1_REG_LCR_DLAB
+    ; Divisor = 1, 115200 baud.
+    OUTB    COM1_REG_DLAB_0, 1
     OUTB    COM1_REG_DLAB_1, 0 
     
-    OUTB    
-    OUTB    COM1_PORT+3, 0x03   ; 8N1 settings, DLAB-disable.
-    OUTB    COM1_PORT+2, 0x07   ; 1-byte FIFO, reset send+recv, enable FIFO
+    ; Clear DLAB, set 8N1.
+    OUTB    COM1_REG_LCR, COM1_REG_LCR_8N1
 
-    ; Test the port.
+    ; Enable and clear FIFOs for TX and RX. Set them to 1 byte.
+    OUTB    COM1_REG_FCR, (\
+                COM1_REG_FCR_EN | \
+                COM1_REG_FCR_CLR_RX | \
+                COM1_REG_FCR_CLR_TX)
 
+    ; Setup port for testing.
+    OUTB    COM1_REG_MCR, (\
+                COM1_REG_MCR_F_RTS | \
+                COM1_REG_MCR_AUX1 | \
+                COM1_REG_MCR_AUX2 | \
+                COM1_REG_MCR_LOOP)
+    
+    ; Load dx with the data register address for repeated use.
+    mov     dx, COM1_REG_DATA
+
+    ; Load the test byte value and send it.
+    mov     al, 0xA5
+    out     dx, al
+
+    ; Save the test value and read the looped value.
+    mov     bl, al
+    in      al, dx
+
+    ; Check for equal.
+    cmp     al, bl
+    jnz     failure
+
+    ; Passed, initialize for use.
+    OUTB    COM1_REG_MCR, (\
+                COM1_REG_MCR_F_DTR | \
+                COM1_REG_MCR_F_RTS | \
+                COM1_REG_MCR_AUX1 | \
+                COM1_REG_MCR_AUX2)
+        
     ; Attempt to send connect packet.
+    mov     bx, protHdr
+    mov     cx, [protHdr_Size]
+    mov     dx, COM1_REG_DATA
+    call    sendBytes
     
     ; Read the boot image payload.
     
-; Pad until disk time stamp.
+    jmp     failure
+    
+; sendByte:
+;   ah = Byte to send.
+;   dx = Port Address.
+sendByte:
+    push    dx
+    mov     dx, COM1_REG_LSR
+    
+sendByte_GetStatus:
+    in      al, dx
+    test    al, COM1_REG_LSR_S_ETX
+    jz      sendByte_GetStatus
+    
+    ; Prepare to send bte.
+    mov     al, ah
+    
+    ; Restore send address.
+    pop     dx
+    out     dx, al
+    
+    ret
+
+; sendBytes:
+;   bx = Location pointer.
+;   cx = Byte Count.
+;   dx = Port address.
+sendBytes:
+    ; Return when count is 0.
+    test    cx, cx
+    jz      sendBytes_exit
+    
+    mov     ah, [bx]
+    call    sendByte
+    
+    dec     cx
+    
+sendBytes_exit:
+    ret
+
+; Define failure target.
+failure:
+    ; Loop on failure.
+    jmp     $
+
+; Define protocol data.
+; The header expected before every message.
+protHdr:
+    db      'E', 'x', 'O', 's'
+protHdr_Size:
+    dw      ($ - protHdr)
+
+; Pad until partitio table.
 times 0x1BE-($-$$) nop
 
 ; Partition Table Entries

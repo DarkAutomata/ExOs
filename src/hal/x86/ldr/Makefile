@@ -15,7 +15,7 @@ include $(CONF_ROOT)/bld.env.x86.preboot.mk
 
 
 $(BLD_OUT)/boot_rs232.bin: $(BLD_OUT)/boot_rs232.o
-	echo CREATE BOOT IMAGE.
+	cp $< $@
 
 $(BLD_OUT)/%.o: %.asm
 	$(BLD_TOOL_NASM) -f bin -o $@ -l $@.lst $<
