@@ -51,17 +51,9 @@
 ; Line Control Register
 %define COM1_REG_LCR        (COM1_PORT + 3)
 %define COM1_REG_LCR_DLAB   0x80
-%define COM1_REG_LCR_BRK_E  0x40
+%define COM1_REG_LCR_SNDBK  0x40
+%define COM1_REG_LCR_STCKYB 0x20
 %define COM1_REG_LCR_8N1    0x03
-
-; Moden Control Register
-%define COM1_REG_MCR        (COM1_PORT + 4)
-%define COM1_REG_MCR_F_DTR  0x01
-%define COM1_REG_MCR_F_RTS  0x02
-%define COM1_REG_MCR_AUX1   0x04
-%define COM1_REG_MCR_AUX2   0x08
-%define COM1_REG_MCR_LOOP   0x10
-%define COM1_REG_MCR_AFM    0x20
 
 ; Line Status Register
 %define COM1_REG_LSR        (COM1_PORT + 5)
@@ -150,50 +142,25 @@ boot:
     ; Disable interrupts.
     OUTB    COM1_REG_IER, 0
     ; Set DLAB mode.
-    OUTB    COM1_REG_LCR, COM1_REG_LCR_DLAB
+    OUTB    COM1_REG_LCR, (\
+            COM1_REG_LCR_DLAB | \
+            COM1_REG_LCR_8N1)
+    
     ; Divisor = 1, 115200 baud.
     OUTB    COM1_REG_DLAB_0, 1
     OUTB    COM1_REG_DLAB_1, 0 
     
     ; Clear DLAB, set 8N1.
-    OUTB    COM1_REG_LCR, COM1_REG_LCR_8N1
+    OUTB    COM1_REG_LCR, (\
+        COM1_REG_LCR_8N1 | \
+        COM1_REG_LCR_8N1)
 
     ; Enable and clear FIFOs for TX and RX. Set them to 1 byte.
     OUTB    COM1_REG_FCR, (\
-                COM1_REG_FCR_EN | \
-                COM1_REG_FCR_CLR_RX | \
-                COM1_REG_FCR_CLR_TX)
+            COM1_REG_FCR_EN | \
+            COM1_REG_FCR_CLR_RX | \
+            COM1_REG_FCR_CLR_TX)
 
-    ; Setup port for testing.
-    OUTB    COM1_REG_MCR, (\
-                COM1_REG_MCR_F_RTS | \
-                COM1_REG_MCR_AUX1 | \
-                COM1_REG_MCR_AUX2 | \
-                COM1_REG_MCR_LOOP)
-    
-    ; Load dx with the data register address for repeated use.
-    mov     dx, COM1_REG_DATA
-
-    ; Load the test byte value and send it.
-    mov     al, 0xA5
-    out     dx, al
-
-    ; Save the test value and read the looped value.
-    mov     bl, al
-    in      al, dx
-
-    ; Check for equal.
-    cmp     al, bl
-    mov     dx, $
-    jnz     failure
-
-    ; Passed, initialize for use.
-    OUTB    COM1_REG_MCR, (\
-                COM1_REG_MCR_F_DTR | \
-                COM1_REG_MCR_F_RTS | \
-                COM1_REG_MCR_AUX1 | \
-                COM1_REG_MCR_AUX2)
-        
     ; Attempt to send connect packet.
     mov     bx, protHdr
     mov     cx, [protHdr_Size]
