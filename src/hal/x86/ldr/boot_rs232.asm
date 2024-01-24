@@ -34,42 +34,42 @@
 %define COM1_PORT           0x03F8
 
 ; Data Register
-%define COM1_REG_DATA       (COM1_PORT + 0)
+%define COM_REG_DATA_IDX    0
 ; Interrupt Enable Register
-%define COM1_REG_IER        (COM1_PORT + 1)
+%define COM_REG_IER_IDX     1
 ; DLAB+ Clock Divisor Low
-%define COM1_REG_DLAB_0     (COM1_PORT + 0)
+%define COM_REG_DLAB_0_IDX  0
 ; DLAB+ Clock Divisor High
-%define COM1_REG_DLAB_1     (COM1_PORT + 1)
+%define COM_REG_DLAB_1_IDX  1
 ; FIFO Config Register
-%define COM1_REG_FCR        (COM1_PORT + 2)
-%define COM1_REG_FCR_EN     0x01
-%define COM1_REG_FCR_CLR_RX     0x02
-%define COM1_REG_FCR_CLR_TX     0x04  
-%define COM1_REG_FCR_DMA_SEL    0x08
+%define COM_REG_FCR_IDX     2
+%define COM_REG_FCR_EN      0x01
+%define COM_REG_FCR_CLR_RX  0x02
+%define COM_REG_FCR_CLR_TX  0x04  
+%define COM_REG_FCR_DMA_SEL 0x08
 
 ; Line Control Register
-%define COM1_REG_LCR        (COM1_PORT + 3)
-%define COM1_REG_LCR_DLAB   0x80
-%define COM1_REG_LCR_SNDBK  0x40
-%define COM1_REG_LCR_STCKYB 0x20
-%define COM1_REG_LCR_8N1    0x03
+%define COM_REG_LCR_IDX     3
+%define COM_REG_LCR_DLAB    0x80
+%define COM_REG_LCR_SNDBK   0x40
+%define COM_REG_LCR_STCKYB  0x20
+%define COM_REG_LCR_8N1     0x03
 
 ; Line Status Register
-%define COM1_REG_LSR        (COM1_PORT + 5)
-%define COM1_REG_LSR_DRDY   0x01
-%define COM1_REG_LSR_E_OVR  0x02
-%define COM1_REG_LSR_E_PAR  0x04
-%define COM1_REG_LSR_E_FRM  0x08
-%define COM1_REG_LSR_I_BRK  0x10
-%define COM1_REG_LSR_S_ETX  0x20
-%define COM1_REG_LSR_s_EDH  0x40
-%define COM1_REG_LSR_E_FFO  0x80
+%define COM_REG_LSR_IDX     5
+%define COM_REG_LSR_DRDY    0x01        ; Data Ready.
+%define COM_REG_LSR_E_OVR   0x02        ; Overrun Error.
+%define COM_REG_LSR_E_PAR   0x04        ; Parity Error.
+%define COM_REG_LSR_E_FRM   0x08        ; Framing Error.
+%define COM_REG_LSR_I_BRK   0x10        ; Break Indicator.
+%define COM_REG_LSR_S_TXH   0x20        ; Transmitter Holding Indicator.
+%define COM_REG_LSR_s_EDH   0x40        ; Transmitter Empty Indicator.
+%define COM_REG_LSR_E_FFO   0x80        ; FIFO Error.
 
 ; Modem Status Register
-%define COM1_REG_MSR        (COM1_PORT + 6)
+%define COM_REG_MSR_IDX     6
 ; Scratch Register
-%define COM1_REG_SCRATCH    (COM1_PORT + 7)
+%define COM_REG_SCRATCH_IDX     7
 
 %define BOOT_DATA_BASE      0x0A00
 %define BOOT_STACK_BASE     0x7BF0
@@ -88,17 +88,6 @@ struc MBR_PART_ENTRY
 
     .size:
 endstruc
-
-%macro OUTB 2
-    mov     dx, %1
-    mov     al, %2
-    out     dx, al
-%endmacro
-
-%macro INB 1
-    mov     dx, %1
-    inb     al, dx
-%endmacro
 
 section .code
 org RELOC_DST
@@ -138,75 +127,153 @@ boot:
     ; Enable interrupts.
     sti
     
-    ; Configure COM1 for 8N1 @ 115200 baud, then wait for boot upload.
+    ; Configure COM for 8N1 @ 115200 baud, then wait for boot upload.
     ; Disable interrupts.
-    OUTB    COM1_REG_IER, 0
+    mov     dx, COM_REG_IER_IDX
+    mov     al, 0
+    call    outByte
+    
     ; Set DLAB mode.
-    OUTB    COM1_REG_LCR, (\
-            COM1_REG_LCR_DLAB | \
-            COM1_REG_LCR_8N1)
+    mov     dx, COM_REG_LCR_IDX
+    mov     al, (\
+                COM_REG_LCR_DLAB | \
+                COM_REG_LCR_8N1)
+    call    outByte
     
     ; Divisor = 1, 115200 baud.
-    OUTB    COM1_REG_DLAB_0, 1
-    OUTB    COM1_REG_DLAB_1, 0 
+    mov     dx, COM_REG_DLAB_0_IDX
+    mov     al, 1
+    call    outByte
+    
+    mov     dx, COM_REG_DLAB_1_IDX
+    mov     al, 0
+    call    outByte
     
     ; Clear DLAB, set 8N1.
-    OUTB    COM1_REG_LCR, (\
-        COM1_REG_LCR_8N1 | \
-        COM1_REG_LCR_8N1)
-
+    mov     dx, COM_REG_LCR_IDX
+    mov     al, COM_REG_LCR_8N1
+    call    outByte
+    
     ; Enable and clear FIFOs for TX and RX. Set them to 1 byte.
-    OUTB    COM1_REG_FCR, (\
-            COM1_REG_FCR_EN | \
-            COM1_REG_FCR_CLR_RX | \
-            COM1_REG_FCR_CLR_TX)
+    mov     dx, COM_REG_FCR_IDX
+    mov     al, (\
+                COM_REG_FCR_EN | \
+                COM_REG_FCR_CLR_RX | \
+                COM_REG_FCR_CLR_TX)
+    call    outByte
 
     ; Attempt to send connect packet.
     mov     bx, protHdr
-    mov     cx, [protHdr_Size]
-    mov     dx, COM1_REG_DATA
     call    sendBytes
     
+readBootImage:
     ; Read the boot image payload.
-    mov     dx, $
-    jmp     failure
+    call    syncRemote
     
+    jmp     readBootImage
+
+inByte:
+    add     dx, [comAddress]
+    in      al, dx
+    ret
+
+outByte:
+    add     dx, [comAddress]
+    out     dx, al
+    ret
+
+; syncRemote
+;   Broadcasts protocol header and listens for response on 5 second intervals
+;   until connection.
+syncRemote:
+    mov     dx, strStatusPending
+    call    printString
+    
+    mov     bx, protHdr
+    call    sendBytes
+    
+    ; Loop looking for incoming data.
+    mov     cx, 1000
+
+syncRemote_ReadLoop:
+    ; First decrement and test.
+    dec     cx
+    jz      syncRemote      ; Jump back to sending the header.
+    
+    ; Read status register and test against data ready.
+    mov     dx, COM_REG_LSR_IDX
+    call    inByte
+    
+    test    al, COM_REG_LSR_DRDY
+    jz      syncRemote_ReadLoop
+    
+    mov     dx, strStatusReading
+    call    printString
+    
+    ; Read image.
+    jmp $
+
 ; sendByte:
 ;   ah = Byte to send.
-;   dx = Port Address.
 sendByte:
-    push    dx
-    mov     dx, COM1_REG_LSR
+    push    cx
+    
+    mov     dx, COM_REG_LSR_IDX
+    add     dx, [comAddress]
+    
+    mov     cx, 1000
     
 sendByte_GetStatus:
+    dec     cx
+    jz      sendByte_Exit
+    
     in      al, dx
-    test    al, COM1_REG_LSR_S_ETX
+    test    al, COM_REG_LSR_S_TXH
     jz      sendByte_GetStatus
     
     ; Prepare to send bte.
     mov     al, ah
-    
-    ; Restore send address.
-    pop     dx
     out     dx, al
-    
+
+sendByte_Exit:
+    pop     cx
     ret
 
 ; sendBytes:
 ;   bx = Location pointer.
-;   cx = Byte Count.
-;   dx = Port address.
 sendBytes:
-    ; Return when count is 0.
-    test    cx, cx
-    jz      sendBytes_exit
-    
+    ; Return when send value is 0.
     mov     ah, [bx]
+    inc     bx
+    test    ah, ah
+    jz      sendBytes_Exit
+    
     call    sendByte
+    jmp     sendBytes
     
-    dec     cx
+sendBytes_Exit:
+    ret
+
+printString:
+    push    ax
+    push    bx
     
-sendBytes_exit:
+    mov     bx, dx
+
+printString_Loop:
+    mov     al, [bx]
+    test    al, al
+    jz      printString_Exit
+    
+    inc     dx
+    mov     ah, 0x0E
+    int     0x10
+    
+    jmp     printString_Loop
+    
+printString_Exit:
+    pop     bx
+    pop     ax
     ret
 
 ; Define failure target.
@@ -217,9 +284,16 @@ failure:
 ; Define protocol data.
 ; The header expected before every message.
 protHdr:
-    db      'E', 'x', 'O', 's'
-protHdr_Size:
-    dw      ($ - protHdr)
+    db      'E', 'x', 'O', 's', 0
+
+strStatusPending:
+    db      '.', 0
+
+strStatusReading:
+    db      '=', 0
+
+comAddress:
+    dw      COM1_PORT
 
 ; Pad until partitio table.
 times 0x1BE-($-$$) nop
