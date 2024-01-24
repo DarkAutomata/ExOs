@@ -184,6 +184,7 @@ boot:
 
     ; Check for equal.
     cmp     al, bl
+    mov     dx, $
     jnz     failure
 
     ; Passed, initialize for use.
@@ -200,7 +201,7 @@ boot:
     call    sendBytes
     
     ; Read the boot image payload.
-    
+    mov     dx, $
     jmp     failure
     
 ; sendByte:

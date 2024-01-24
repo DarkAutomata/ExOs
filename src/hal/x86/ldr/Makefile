@@ -20,5 +20,7 @@ $(BLD_OUT)/boot_rs232.bin: $(BLD_OUT)/boot_rs232.o
 $(BLD_OUT)/%.o: %.asm
 	$(BLD_TOOL_NASM) -f bin -o $@ -l $@.lst $<
 
+mbr: $(BLD_OUT)/boot_rs232.bin
+	dd if=$< of=../vhdimage/test0.vhd conv=notrunc
 
 
