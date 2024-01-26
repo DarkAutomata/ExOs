@@ -162,10 +162,6 @@ boot:
                 COM_REG_FCR_CLR_TX)
     call    outByte
 
-    ; Attempt to send connect packet.
-    mov     bx, protHdr
-    call    sendBytes
-    
 readBootImage:
     ; Read the boot image payload.
     call    syncRemote
@@ -182,34 +178,60 @@ outByte:
     out     dx, al
     ret
 
+; delay
+;   Executes a short delay.
+delay:
+    push    bx
+    push    cx
+    
+    mov     cx, 0x0100
+    
+delay_Loop0:
+    mov     bx, 0xFFFF
+    
+delay_Loop1:
+    dec     bx
+    jnz     delay_Loop1
+    
+    dec     cx
+    jnz     delay_Loop0
+    
+    pop     cx
+    pop     bx
+    ret
+    
 ; syncRemote
-;   Broadcasts protocol header and listens for response on 5 second intervals
-;   until connection.
+;   Waits until connection established by remote host.
 syncRemote:
+    ; Swap R and S for printing to indicate receiving.
+    mov     dl, 0x01
+    xor     [strStatusPending+1], dl
+    
     mov     dx, strStatusPending
     call    printString
     
-    mov     bx, protHdr
-    call    sendBytes
-    
     ; Loop looking for incoming data.
-    mov     cx, 1000
+    mov     cx, 0x8000
 
 syncRemote_ReadLoop:
-    ; First decrement and test.
-    dec     cx
-    jz      syncRemote      ; Jump back to sending the header.
-    
-    ; Read status register and test against data ready.
     mov     dx, COM_REG_LSR_IDX
     call    inByte
     
     test    al, COM_REG_LSR_DRDY
-    jz      syncRemote_ReadLoop
+    jnz     syncRemote_ReadHdr
     
-    mov     dx, strStatusReading
-    call    printString
+    call    delay
     
+    ; Decrement and evaluate loop.
+    dec     cx
+    jnz     syncRemote_ReadLoop
+    
+    jmp $
+
+    ; Continue trying to sync the remote.
+    jmp     syncRemote
+    
+syncRemote_ReadHdr:
     ; Read image.
     jmp $
 
@@ -254,21 +276,27 @@ sendBytes:
 sendBytes_Exit:
     ret
 
+; printString:
+;   dx = String to print.
 printString:
     push    ax
     push    bx
     
     mov     bx, dx
-
+    
 printString_Loop:
     mov     al, [bx]
     test    al, al
     jz      printString_Exit
     
-    inc     dx
+    inc     bx
     mov     ah, 0x0E
-    int     0x10
     
+    push    bx
+    mov     bx, 0
+    int     0x10
+    pop     bx
+
     jmp     printString_Loop
     
 printString_Exit:
@@ -287,10 +315,7 @@ protHdr:
     db      'E', 'x', 'O', 's', 0
 
 strStatusPending:
-    db      '.', 0
-
-strStatusReading:
-    db      '=', 0
+    db      '8', 'R', 0
 
 comAddress:
     dw      COM1_PORT
