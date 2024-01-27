@@ -4,16 +4,12 @@
 PRJ_ROOT=../..
 CMP_PATH=boot/dbg
 
-include $(PRJ_ROOT)/conf/cfg.pre.mk
+include $(PRJ_ROOT)/conf/bld.sys.init.mk
 
-TARGET_TYPE=dir
-
-TARGET_LIST=\
-	app\
-
+BLD_TARGETS=
 
 # 
 # Execute the data configured above according to standard build system rules.
 #
-include $(PRJ_ROOT)/cfg/cfg.post.mk
+include $(CONF_ROOT)/bld.env.nop.mk
 
