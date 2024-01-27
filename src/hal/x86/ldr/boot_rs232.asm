@@ -72,7 +72,9 @@
 %define COM_REG_SCRATCH_IDX     7
 
 %define BOOT_DATA_BASE      0x0A00
-%define BOOT_STACK_BASE     0x7BF0
+
+%define BOOT_STACK_SEG      0x1000
+%define BOOT_STACK_BASE     0xFF00
 
 struc BOOT_DATA
     .DriveNumber:   resw    1       ; The BIOS provided drive number.
@@ -123,6 +125,9 @@ boot:
     ; Setup the stack pointer.
     mov     ax, BOOT_STACK_BASE
     mov     sp, ax
+    
+    mov     ax, BOOT_STACK_SEG
+    mov     ss, ax
     
     ; Enable interrupts.
     sti
@@ -184,7 +189,7 @@ delay:
     push    bx
     push    cx
     
-    mov     cx, 0x0100
+    mov     cx, 0x0010
     
 delay_Loop0:
     mov     bx, 0xFFFF
@@ -203,17 +208,20 @@ delay_Loop1:
 ; syncRemote
 ;   Waits until connection established by remote host.
 syncRemote:
-    ; Swap R and S for printing to indicate receiving.
-    mov     dl, 0x01
-    xor     [strStatusPending+1], dl
     
-    mov     dx, strStatusPending
+    ; Infinite loop looking for data to load.
+syncRemote_ReadLoop:
+    ; Setup alternating wait status.
+    inc     cx
+    
+    mov     dx, cx
+    and     dx, 0x0003
+    shl     dx, 1
+    
+    add     dx, strStatusPending
+
     call    printString
     
-    ; Loop looking for incoming data.
-    mov     cx, 0x8000
-
-syncRemote_ReadLoop:
     mov     dx, COM_REG_LSR_IDX
     call    inByte
     
@@ -222,14 +230,11 @@ syncRemote_ReadLoop:
     
     call    delay
     
-    ; Decrement and evaluate loop.
-    dec     cx
-    jnz     syncRemote_ReadLoop
+    mov     dx, strBackspace
+    call    printString
     
-    jmp $
-
-    ; Continue trying to sync the remote.
-    jmp     syncRemote
+    ; Repeat, until connection.
+    jmp     syncRemote_ReadLoop
     
 syncRemote_ReadHdr:
     ; Read image.
@@ -314,8 +319,14 @@ failure:
 protHdr:
     db      'E', 'x', 'O', 's', 0
 
+strBackspace:
+    db      8, 0
+
 strStatusPending:
-    db      '8', 'R', 0
+    db      '-',  0
+    db      '\',  0
+    db      '|',  0
+    db      '/',  0
 
 comAddress:
     dw      COM1_PORT
