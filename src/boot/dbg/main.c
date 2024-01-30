@@ -72,8 +72,8 @@ DbgState_Create(
     pState->RdEvt = CreateEventA(NULL, FALSE, FALSE, NULL);
     pState->WrEvt = CreateEventA(NULL, FALSE, FALSE, NULL);
     
-    if ((pState->RdEvent == NULL) ||
-        (pState->WrEvent == NULL))
+    if ((pState->RdEvt == NULL) ||
+        (pState->WrEvt == NULL))
     {
         DbgState_Destroy(pState);
         
@@ -97,10 +97,10 @@ DbgState_Destroy(
     if (pState->RdEvt)
     {
         CloseHandle(pState->RdEvt);
-        pState->RdEvent = NULL;
+        pState->RdEvt = NULL;
     }
     
-    if (pStae->WrEvt)
+    if (pState->WrEvt)
     {
         CloseHandle(pState->WrEvt);
         pState->WrEvt = NULL;
@@ -166,6 +166,8 @@ DbgState_SendData(
         return FALSE;
     }
     
+    pState->WrOvr.hEvent = pState->WrEvt;
+    
     result = WriteFile(
             pState->PipeHnd,
             pData,
@@ -184,20 +186,20 @@ DbgState_SendData(
     {
         WaitForSingleObject(pState->WrEvt, INFINITE);
         pState->WrPnd = FALSE;
-        
-        result = GetOverlappedResult(
-                pState->PipeHnd,
-                pState->WrOvr, 
-                &bytesWritten,
-                FALSE);
-        
-        if (! result)
-        {
-            fprintf(
-                    stdout, "DBG - %s:%d DbgState_SendData Failure: %08X\n",
-                    __FILE__, __LINE__,
-                    GetLastError());
-        }
+    }
+    
+    result = GetOverlappedResult(
+            pState->PipeHnd,
+            &pState->WrOvr, 
+            &bytesWritten,
+            FALSE);
+    
+    if (! result)
+    {
+        fprintf(
+                stdout, "DBG - %s:%d DbgState_SendData Failure: %08X\n",
+                __FILE__, __LINE__,
+                GetLastError());
     }
     
     return result;
@@ -210,6 +212,51 @@ DbgState_ReadData(
     _In_ ULONG ByteCount
     )
 {
+    BOOL result = FALSE;
+    DWORD bytesRead;
+    
+    if (! pState->PipeRdy)
+    {
+        return FALSE;
+    }
+    
+    pState->RdOvr.hEvent = pState->RdEvt;
+    
+    result = ReadFile(
+            pState->PipeHnd,
+            pData,
+            ByteCount,
+            &bytesRead,
+            &pState->RdOvr);
+    if (! result)
+    {
+        if (GetLastError() == ERROR_IO_PENDING)
+        {
+            pState->RdPnd = TRUE;
+        }
+    }
+    
+    if (pState->RdPnd)
+    {
+        WaitForSingleObject(pState->RdEvt, INFINITE);
+        pState->RdPnd = FALSE;
+    }
+    
+    result = GetOverlappedResult(
+            pState->PipeHnd,
+            &pState->RdOvr, 
+            &bytesRead,
+            FALSE);
+    
+    if (! result)
+    {
+        fprintf(
+                stdout, "DBG - %s:%d DbgState_ReadData Failure: %08X\n",
+                __FILE__, __LINE__,
+                GetLastError());
+    }
+    
+    return result;
 }
 
 int
@@ -218,150 +265,25 @@ main(
     char* argv[]
     )
 {
-    DBG_STATE dbgHost = {0};
+    DBG_STATE dbgState = {0};
+    const char* pPipeName = "!!!";
     
-    dbgHost.PipeHnd = INVALID_HANDLE_VALUE;
+    pPipeName = argv[1];
     
-    dbgHost.rdEvt = CreateEvent(NULL, FALSE, FALSE, NULL);
-    if (dbgHost.rdEvt == NULL)
+    if (! DbgState_ClientConn(&dbgState, pPipeName))
     {
-        goto Cleanup;
+        fprintf(stdout, "Failed to connect client.\n");
+        return 1;
     }
     
-    dbgHost.wrEvt = CreateEvent(NULL, FALSE, FALSE, NULL);
-    if (dbgHost.wrEvt == NULL)
+    if (! DbgState_SendData(&dbgState, (const BYTE*)("ExOs"), 4))
     {
-        goto Cleanup;
-    }
-    
-    if (0 == stricmp(argv[1], "client"))
-    {
-        while (pipeHandle == INVALID_HANDLE_VALUE)
-        {
-            pipeHandle = CreateFileA(
-                    argv[2],
-                    (GENERIC_READ | GENERIC_WRITE),
-                    0,
-                    NULL,
-                    OPEN_EXISTING,
-                    FILE_FLAG_OVERLAPPED,
-                    NULL);
-            
-            if (pipeHandle != INVALID_HANDLE_VALUE)
-            {
-                break;
-            }
-            
-            if (GetLastError() == ERROR_PIPE_BUSY)
-            {
-                WaitNamedPipe(argv[2], 10000);
-            }
-            else
-            {
-                fprintf(stdout, "Error: %08X\n", GetLastError());
-                Sleep(1000);
-            }
-        }
-    }
-    else if (0 == stricmp(argv[1], "server"))
-    {
-        // Create the pipe handle.
-        pipeHandle = CreateNamedPipeA(
-                argv[2],
-                (PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED),
-                (PIPE_TYPE_BYTE |
-                PIPE_READMODE_MESSAGE |
-                PIPE_WAIT),
-                PIPE_UNLIMITED_INSTANCES,
-                4096,
-                4096,
-                0,
-                NULL);
-    }
-    else
-    {
-        Usage();
-        return -1;
-    }
-    
-    if (pipeHandle == INVALID_HANDLE_VALUE)
-    {
-        fprintf(stdout, "Creation Failure: %08X\n", GetLastError());
-        goto Cleanup;
-    }
-    
-    connected = TRUE;
-    
-    if (! connected)
-    {
-        fprintf(stdout, "Connection Failure: %08X\n", GetLastError());
-        goto Cleanup;
-    }
-    
-    while (connected)
-    {
-        if (! rdQueued)
-        {
-            ZeroMemory(&rdOverlapped, sizeof(rdOverlapped));
-            rdOverlapped.hEvent = rdEvent;
-            
-            rdQueued = ReadFile(
-                    pipeHandle,
-                    &rdBuffer[rdBufferIndex],
-                    1,
-                    NULL,
-                    &rdOverlapped);
-            if (! rdQueued)
-            {
-                if (GetLastError() == ERROR_IO_PENDING)
-                {
-                    rdQueued = TRUE;
-                }
-                else
-                {
-                    fprintf(stdout, "Read failure: %08X\n", GetLastError());
-                    goto Cleanup;
-                }
-            }
-        }
-        
-        // 
-        // Attempt to send 
-        // 
-        // Wait until data read.
-        //
-        WaitForSingleObject(rdEvent, INFINITE);
-        rdBufferIndex++;
-        
-        // 
-        // Check for valid data.
-        // 
-        if (rdBufferIndex >= 4)
-        {
-            rdBuffer[rdBufferIndex] = 0;
-            fprintf(stdout, "RECEIVED: %s\n", rdBuffer);
-            rdBufferIndex = 0;
-        }
+        fprintf(stdout, "Failed to send connect packet.\n");
+        return 1;
     }
     
 Cleanup:
-    
-    fprintf(stdout, "Exiting.\n");
-
-    if (pipeHandle != INVALID_HANDLE_VALUE)
-    {
-        CloseHandle(pipeHandle);
-    }
-    
-    if (rdEvent != NULL)
-    {
-        CloseHandle(rdEvent);
-    }
-    
-    if (wrEvent != NULL)
-    {
-        CloseHandle(wrEvent);
-    }
+    DbgState_Destroy(&dbgState);
     
     return 0;
 }
