@@ -1,0 +1,26 @@
+#! /bin/bash
+
+confDir0=$(dirname $0)
+confDir1="${confDir0//\/mnt\/c/c\:}"
+confDir="${confDir1//\//\\}"
+
+AllArgs=${confDir}\\win32.exe.cmd
+
+for arg in "$@"
+do
+    # Keep the first character (if it's a slash, it's a parameter and not a
+    # path). Add it back at the end.
+    procArgChar0=${arg:0:1}
+    procArg0=${arg:1}
+    
+    # echo 0: $arg
+    procArg1="${procArg0//\/mnt\/c/c\:}"
+    procArg2="${procArg1//\//\\}"
+    
+    # Recombine processed with first letter save above.
+    AllArgs="${AllArgs} ${procArgChar0}${procArg2}"
+done
+
+echo Running: cmd.exe /C $AllArgs
+cmd.exe /C $AllArgs
+
