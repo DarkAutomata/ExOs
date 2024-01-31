@@ -22,22 +22,13 @@ include $(CONF_ROOT)/arch.$(BLD_ARCH).mk
 # 
 # Define useful helpers.
 #
-define bld_tool_asm
-
-endef
 
 # 
 # Invoke the appropriate build stages.
 #
 .PHONY: all
-all: package
+all: bld_stage_build
 
 .PHONY: clean
 clean: bld_stage_clean
-
-.PHONY: build
-build: bld_stage_init bld_stage_build
-
-.PHONY: package
-package: build bld_stage_package
 

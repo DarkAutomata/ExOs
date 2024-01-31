@@ -6,7 +6,7 @@ CUR_PATH=hal/x86
 
 include $(PRJ_ROOT)/conf/bld.sys.init.mk
 
-BLD_TARGETS=\
+BLD_TARGET=\
 	ldr\
 
 include $(CONF_ROOT)/bld.env.dir.mk

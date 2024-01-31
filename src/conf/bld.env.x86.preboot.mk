@@ -10,21 +10,29 @@
 #   bld_stage_build:
 #     - Builds the repository tree.
 #
-#   bld_stage_package:
-#     - Creates appropriate execution layout.
-# 
+
+include $(CONF_ROOT)/local.env.mk
+
 
 # 
 # x86 preboot (bare) tooling.
 # 
 
-BLD_TOOL_NASM=nasm
+BLD_TOOL_NASM=$(ENV.PREBOOT.NASM)
+
+#
+# Preserve intermediate targets.
+#
+.SECONDARY: $(BLD_OBJ_TARGETS)
+
+$(BLD_OUT)/%.o: %.asm
+	$(BLD_TOOL_NASM) -f bin -o $@ -l $(@:.o=.lst) $<
 
 # 
 # Define standard processing for the build type using the following known
 # variables:
 # 
-# - BLD_TARGETS
+# - BLD_TARGET
 #   - The final results in the build directory the rule should produce.
 # 
 
@@ -32,13 +40,10 @@ BLD_TOOL_NASM=nasm
 bld_stage_clean:
 	rm -f $(BLD_OUT)/*
 
-.PHONY: bld_stage_init
-bld_stage_init:
+$(BLD_OUT):
 	mkdir -p $(BLD_OUT)
 
 .PHONY: bld_stage_build
-bld_stage_build: $(BLD_TARGETS)
+bld_stage_build: $(BLD_OUT) $(BLD_TARGET)
 
-.PHONY: bld_stage_package
-bld_stage_package: $(BLD_PACKAGES)
 

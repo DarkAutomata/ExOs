@@ -6,20 +6,18 @@ CUR_PATH=hal/x86/ldr
 
 include $(PRJ_ROOT)/conf/bld.sys.init.mk
 
-BLD_TARGETS=\
-	$(BLD_OUT)/boot_rs232.bin\
+BLD_OBJ_TARGETS=\
+	$(BLD_OUT)/boot_rs232.o \
+	$(BLD_OUT)/boot_rs232.bin \
 
-BLD_PACKAGES=\
-
-include $(CONF_ROOT)/bld.env.x86.preboot.mk
-
+BLD_TARGET=\
+	$(BLD_OUT)/boot_rs232.bin
 
 $(BLD_OUT)/boot_rs232.bin: $(BLD_OUT)/boot_rs232.o
 	cp $< $@
 
-$(BLD_OUT)/%.o: %.asm
-	$(BLD_TOOL_NASM) -f bin -o $@ -l $@.lst $<
-
 mbr: $(BLD_OUT)/boot_rs232.bin
 	dd if=$< of=../vhdimage/ExOs.vhd conv=notrunc
+
+include $(PRJ_ROOT)/conf/bld.env.x86.preboot.mk
 
