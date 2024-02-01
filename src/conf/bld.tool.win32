@@ -21,6 +21,5 @@ do
     AllArgs="${AllArgs} ${procArgChar0}${procArg2}"
 done
 
-echo Running: cmd.exe /C $AllArgs
-cmd.exe /C $AllArgs
+cmd.exe /C @$AllArgs
 

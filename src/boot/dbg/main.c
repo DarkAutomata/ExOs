@@ -119,6 +119,8 @@ DbgState_ClientConn(
     {
         DWORD lastError;
         
+        fprintf(stdout, "ClientConn: [%d]%s...\n", tryCount, pPipeName);
+        
         pState->PipeHnd = CreateFileA(
                 pPipeName,
                 (GENERIC_READ | GENERIC_WRITE),
@@ -147,6 +149,8 @@ DbgState_ClientConn(
             Sleep(1000);
         }
     }
+    
+    fprintf(stdout, "ClineConn: State=%d\n", pState->PipeRdy);
     
     return pState->PipeRdy;
 }
@@ -270,11 +274,14 @@ main(
     
     pPipeName = argv[1];
     
+    fprintf(stdout, "Attempting connection...\n");
+    
     if (! DbgState_ClientConn(&dbgState, pPipeName))
     {
         fprintf(stdout, "Failed to connect client.\n");
         return 1;
     }
+    fprintf(stdout, "Connection successful, sending header...\n");
     
     if (! DbgState_SendData(&dbgState, (const BYTE*)("ExOs"), 4))
     {
@@ -282,7 +289,11 @@ main(
         return 1;
     }
     
+    fprintf(stdout, "Clean exit\n");
+    
 Cleanup:
+    fprintf(stdout, "Cleanup\n");
+    
     DbgState_Destroy(&dbgState);
     
     return 0;
