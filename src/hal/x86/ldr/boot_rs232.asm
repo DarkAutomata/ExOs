@@ -76,6 +76,8 @@
 %define BOOT_STACK_SEG      0x1000
 %define BOOT_STACK_BASE     0xFF00
 
+%define BOOT_LOAD_SEG       0x2000
+
 struc BOOT_DATA
     .DriveNumber:   resw    1       ; The BIOS provided drive number.
 endstruc
@@ -186,23 +188,25 @@ outByte:
 ; delay
 ;   Executes a short delay.
 delay:
-    push    bx
     push    cx
-    
     mov     cx, 0x0010
-    
+
 delay_Loop0:
-    mov     bx, 0xFFFF
+    dec     cx
+    jz      delay_LoopExit
     
+    push    cx
+    mov     cx, 0xFFFF
+
 delay_Loop1:
-    dec     bx
+    dec     cx
     jnz     delay_Loop1
     
-    dec     cx
-    jnz     delay_Loop0
-    
     pop     cx
-    pop     bx
+    jmp     delay_Loop0
+    
+delay_LoopExit:
+    pop     cx
     ret
     
 ; syncRemote
@@ -237,48 +241,110 @@ syncRemote_ReadLoop:
     jmp     syncRemote_ReadLoop
     
 syncRemote_ReadHdr:
-    ; Read image.
-    jmp $
-
-; sendByte:
-;   ah = Byte to send.
-sendByte:
-    push    cx
+    ; Read the header, compare with expected.
+    mov     bx, protHdr
     
-    mov     dx, COM_REG_LSR_IDX
-    add     dx, [comAddress]
+syncRemote_ReadHdr0
+    mov     al, [bx]
+    test    al, al
+    jz      syncRemote_ReadImgSize
     
-    mov     cx, 1000
+    call    readByte
+    cmp     byte [bx], al
+    jz      syncRemote_ReadHdr1
     
-sendByte_GetStatus:
-    dec     cx
-    jz      sendByte_Exit
+    call    failure
     
-    in      al, dx
-    test    al, COM_REG_LSR_S_TXH
-    jz      sendByte_GetStatus
-    
-    ; Prepare to send bte.
-    mov     al, ah
-    out     dx, al
-
-sendByte_Exit:
-    pop     cx
-    ret
-
-; sendBytes:
-;   bx = Location pointer.
-sendBytes:
-    ; Return when send value is 0.
-    mov     ah, [bx]
+syncRemote_ReadHdr1:
     inc     bx
-    test    ah, ah
-    jz      sendBytes_Exit
+    jmp     syncRemote_ReadHdr0
     
-    call    sendByte
-    jmp     sendBytes
+syncRemote_ReadImgSize:
+    mov     dx, protHdr
+    call    printString
     
-sendBytes_Exit:
+    call    readByte
+    mov     cl, al
+    
+    call    readByte
+    mov     ch, al
+    
+    ; Initialize location information. Loader starts at 0x20000.
+    mov     ax, BOOT_LOAD_SEG
+    mov     es, ax
+    
+    ; bx contains the base address for writing.
+    mov     bx, 0
+    
+    ; Begin reading data in 4K chunks.
+syncRemote_ReadImg:
+    test    cx, cx
+    jz      runLoader
+    
+    mov     dx, strStatusPending
+    call    printString
+    
+    dec     cx
+    mov     di, 0
+    
+syncRemote_ReadImgLoop0:
+    cmp     di, 0x1000
+    jz      syncRemote_ReadImg
+    
+    call    readByte
+    mov     [es:bx+di], al
+    
+    inc     di
+    jmp     syncRemote_ReadImgLoop0
+    
+syncRemote_ReadImgLoop1:
+    add     bx, 0x1000
+    test    bx, bx
+    jnz     syncRemote_ReadImg
+    
+    ; Roll-over detected, update segment.
+    mov     ax, es
+    add     ax, 0x1000
+    mov     es, ax
+    jmp     syncRemote_ReadImg
+    
+runLoader:
+    jmp     $
+    
+; readByte:
+;   al = Value read.
+readByte:
+    push    cx
+    push    dx
+    
+    mov     cx, 0
+
+readByte_WaitLoop:
+    mov     dx, COM_REG_LSR_IDX
+    call    inByte
+    
+    test    al, COM_REG_LSR_DRDY
+    jnz     readByte_ConsumeByte
+    
+    call    delay
+    
+    ; This increments and indexes into the strStatusPending table.
+    inc     cx
+    mov     dx, cx
+    and     dx, 0x0003
+    shl     dx, 1
+    add     dx, strStatusPending
+    call    printString
+    
+    ; Repeat, until byte.
+    jmp     readByte_WaitLoop
+    
+readByte_ConsumeByte:
+    mov     dx, COM_REG_DATA_IDX
+    call    inByte
+    
+    pop     dx
+    pop     cx
     ret
 
 ; printString:
@@ -295,16 +361,24 @@ printString_Loop:
     jz      printString_Exit
     
     inc     bx
-    mov     ah, 0x0E
     
-    push    bx
-    mov     bx, 0
-    int     0x10
-    pop     bx
+    call    printChar
 
     jmp     printString_Loop
     
 printString_Exit:
+    pop     bx
+    pop     ax
+    ret
+
+printChar:
+    push    ax
+    push    bx
+    
+    mov     bx, 0
+    mov     ah, 0x0E
+    int     0x10
+    
     pop     bx
     pop     ax
     ret

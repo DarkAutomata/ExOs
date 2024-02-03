@@ -271,6 +271,23 @@ main(
 {
     DBG_STATE dbgState = {0};
     const char* pPipeName = "!!!";
+    const USHORT pageCount = 0x0201;
+    BYTE* pJunk = NULL;
+    
+    pJunk = (BYTE*)malloc(sizeof(BYTE) * 0x08000);
+    if (! pJunk)
+    {
+        fprintf(stdout, "Alloc failed\n");
+        return 1;
+    }
+    {
+        int i;
+        
+        for (i = 0; i < 0x08000; i++)
+        {
+            pJunk[i] = (BYTE)(i & 0xFF);
+        }
+    }
     
     pPipeName = argv[1];
     
@@ -288,6 +305,24 @@ main(
         fprintf(stdout, "Failed to send connect packet.\n");
         return 1;
     }
+    fprintf(stdout, "Connection header sent.\n");
+    
+    if (! DbgState_SendData(&dbgState, (const BYTE*)&pageCount, 2))
+    {
+        fprintf(stdout, "Sending page count failed.\n");
+        return 1;
+    }
+    fprintf(stdout, "Payload page count send.\n");
+    
+    if (! DbgState_SendData(&dbgState, pJunk, 0x08000))
+    {
+        fprintf(stdout, "Payload send failed\n");
+        return 1;
+    }
+    fprintf(stdout, "Finished send. Waiting to ready.\n");
+    
+    DbgState_ReadData(&dbgState, pJunk, 20);
+    for (;;);
     
     fprintf(stdout, "Clean exit\n");
     
