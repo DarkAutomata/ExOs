@@ -78,7 +78,6 @@
 
 %define BOOT_LOAD_SEG       0x2000
 
-%define EXOS_DBG_PROT_ID_HELLO      0x0000
 %define EXOS_DBG_PROT_ID_UPLOAD_0   0x0001  ; Meta = page count to read.
 
 struc BOOT_DATA
@@ -122,6 +121,9 @@ init:
     ; At this point the code is copied to the destination. Update CS+IP via a
     ; jmp to new code.
     jmp 0:boot
+
+timeCounter:
+    dw      0
 
 boot:
     ; Save the drive number from the BIOS.
@@ -172,19 +174,6 @@ boot:
                 COM_REG_FCR_CLR_TX)
     call    outByte
 
-startSync:
-    mov     cx, 128
-
-sendSync_0:
-    dec     cx
-    jz      readBootImage_ReadHdr_0
-    
-    mov     word [ds:protHdr_Id], EXOS_DBG_PROT_ID_HELLO
-    mov     [ds:protHdr_Meta], cx
-    call    writeHdr
-    
-    jmp     sendSync_0
-    
 readBootImage_ReadHdr_0:
     ; Update the header for reply testing.
     mov     byte [ds:protHdr_Id], EXOS_DBG_PROT_ID_UPLOAD_0
@@ -248,6 +237,23 @@ readBootImage_ReadImg_1:
 runLoader:
     jmp     $
 
+; syncTicks
+;   Read 8 packets (2 seconds) of data and count timing.
+syncTicks:
+    push    cx
+    push    dx
+    
+    xor     cx, cx
+    mov     dx, cx
+    
+syncTicks_0:
+    inc     cx
+    test    cx, cx
+    jnz     syncTicks_0
+    pop     dx
+    pop     cx
+    ret
+
 ; inByte 
 ; Reads a byte from the configured COM port at offset in cx.
 ;   cx:     Offset of configured COM port to read.
@@ -280,55 +286,65 @@ outByte_0:
     pop     dx
     ret
 
+; BYTE getComStatus
+;   Get the current COM LSR.
+getComStatus:
+    push    cx
+    push    dx
+    
+    mov     cx, COM_REG_LSR_IDX
+    call    inByte
+    mov     dl, [ds:state_LastLsr]
+    cmp     al, dl
+    je      getComStatus_0
+    mov     [ds:state_LastLsr], al
+    
+    push    ax
+    call    printState
+    pop     ax
+    
+getComStatus_0:
+    
+    pop     dx
+    pop     cx
+    ret
+
 ; waitComStatus
 ;   Wait for a status bits to be set on the COM port.
-;   cx:     Flags to wait on.
+;   cl:     Flags to wait on.
 waitComStatus:
-    call    inByte
+    push    bx
+    push    cx
+    push    dx
     
-    test    al, COM_REG_LSR_DRDY
+    mov     word [ds:state_WaitIter], 0
+    
+waitComStatus_0:
+    call    getComStatus
+    
+    and     al, cl
     jnz     waitComStatus_End
     
-    call    printState
+    inc     word [ds:state_WaitIter]
     
     ; Repeat, until flags set.
-    jmp     waitComStatus
+    jmp     waitComStatus_0
     
 waitComStatus_End:
+    pop     dx
+    pop     cx
+    pop     bx
     ret
 
 ; BYTE readByte:
 ;   Reads a data byte from the configured COM port.
 readByte:
+    push    cx
     mov     cx, COM_REG_LSR_DRDY
     call    waitComStatus
     mov     cx, COM_REG_DATA_IDX
-    jmp     inByte      ; Tail call.
-
-; writeHdr
-;   Writes protHdr contents to the configured COM port.
-writeHdr:
-    push    bx
-    push    cx
-    push    di
-    
-    mov     bx, protHdr
-    mov     di, 0
-    
-writeHdr_0:
-    mov     cx, COM_REG_LSR_S_TXE
-    call    waitComStatus
-    
-    mov     cl, [ds:bx+di]
-    call    outByte
-    inc     di
-    cmp     di, 8
-    jb      writeHdr_0
-    
-writeHdr_1:
-    pop     di
+    call    inByte
     pop     cx
-    pop     bx
     ret
 
 ; printState:
@@ -346,9 +362,26 @@ printState:
     call    printBin
     
     ; Print a dash.
+    mov     cl, '-'
+    call    printChar
+    
+    ; Print the Meta.
     mov     cx, [ds:protHdr_Meta]
     mov     dx, 16
     call    printBin
+    
+    ; Print a dash
+    mov     cl, '-'
+    call    printChar
+    
+    ; Print the last LSR.
+    mov     cl, [ds:state_LastLsr]
+    mov     dx, 8
+    call    printBin
+    
+    ; Print the WaitIter.
+    mov     cx, [ds:state_WaitIter]
+    mov     dx, 16
     
     pop     dx
     pop     cx
@@ -430,15 +463,23 @@ failure:
 
 ; Define protocol data.
 ; The header expected before every message.
+currentState:
 protHdr:
     db      'E', 'x', 'O', 's'
 protHdr_Id:
-    dw      EXOS_DBG_PROT_ID_HELLO
+    dw      0xFFFF
 protHdr_Meta:
+    dw      0x0000
+state_LastLsr:
+    db      0x00
+state_WaitIter:
     dw      0x0000
 
 comAddress:
     dw      COM1_PORT
+
+timerTicks:
+    dw      0x0000
 
 ; Pad until partitio table.
 times 0x1BE-($-$$) nop
