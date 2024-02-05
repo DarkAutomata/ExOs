@@ -179,7 +179,7 @@ sendSync_0:
     dec     cx
     jz      readBootImage_ReadHdr_0
     
-    mov     [ds:protHdr_Id], EXOS_DBG_PROT_ID_HELLO
+    mov     word [ds:protHdr_Id], EXOS_DBG_PROT_ID_HELLO
     mov     [ds:protHdr_Meta], cx
     call    writeHdr
     
@@ -340,18 +340,9 @@ printState:
     mov     cl, 10          ; Reset cursor position
     call    printChar
     
-    ; Print the version.
-    mov     cl, [ds:protHdr_Version]
-    mov     dx, 8
-    call    printBin
-    
-    ; Print a dash.
-    mov     cl, '-'
-    call    printChar
-    
     ; Print Command ID.
-    mov     cl, [ds:protHdr_Id]
-    mov     dx, 8
+    mov     cx, [ds:protHdr_Id]
+    mov     dx, 16
     call    printBin
     
     ; Print a dash.
