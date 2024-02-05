@@ -10,6 +10,22 @@ Usage()
     fprintf(stdout, "exec (CLIENT | SERVER) PIPE_NAME\n");
 }
 
+typedef struct _DBG_PROT_HDR
+{
+    BYTE Signature[4];      // 'ExOs'
+    USHORT CmdId;           // The protocol command.
+    USHORT Meta;            // Extra data,
+} DBG_PROT_HDR;
+
+#define EXOS_DBG_PROT_ID_HELLO          0x0000
+#define EXOS_DBG_PROT_ID_UPLOAD_0       0x0001
+
+typedef struct _DBG_IMG_SPEC
+{
+    BYTE* pImageData;
+    ULONG ImageSize;
+} DBG_IMG_SPEC;
+
 typedef struct _DBG_STATE
 {
     HANDLE PipeHnd;
@@ -17,8 +33,6 @@ typedef struct _DBG_STATE
     HANDLE WrEvt;
     
     BOOL PipeRdy;
-    BOOL RdPnd;
-    BOOL WrPnd;
     
     OVERLAPPED RdOvr;
     OVERLAPPED WrOvr;
@@ -58,6 +72,12 @@ DbgState_ReadData(
     );
 
 BOOL
+DbgState_SendImage(
+    _Inout_ DBG_STATE* pState,
+    _In_ DBG_IMG_SPEC* pImage
+    );
+
+BOOL
 DbgState_Create(
     _Out_ DBG_STATE* pState
     )
@@ -69,8 +89,8 @@ DbgState_Create(
     pState->PipeHnd = INVALID_HANDLE_VALUE;
     
     // Create everything, check everything.
-    pState->RdEvt = CreateEventA(NULL, FALSE, FALSE, NULL);
-    pState->WrEvt = CreateEventA(NULL, FALSE, FALSE, NULL);
+    pState->RdEvt = CreateEventA(NULL, TRUE, FALSE, NULL);
+    pState->WrEvt = CreateEventA(NULL, TRUE, FALSE, NULL);
     
     if ((pState->RdEvt == NULL) ||
         (pState->WrEvt == NULL))
@@ -150,7 +170,13 @@ DbgState_ClientConn(
         }
     }
     
-    fprintf(stdout, "ClineConn: State=%d\n", pState->PipeRdy);
+    if (! pState->PipeRdy)
+    {
+        fprintf(stdout, "ClientConn Failed\n");
+        goto Cleanup;
+    }
+    
+Cleanup:
     
     return pState->PipeRdy;
 }
@@ -170,6 +196,8 @@ DbgState_SendData(
         return FALSE;
     }
     
+    ResetEvent(pState->WrEvt);
+    
     pState->WrOvr.hEvent = pState->WrEvt;
     
     result = WriteFile(
@@ -182,21 +210,18 @@ DbgState_SendData(
     {
         if (GetLastError() == ERROR_IO_PENDING)
         {
-            pState->WrPnd = TRUE;
+            result = TRUE;
         }
     }
     
-    if (pState->WrPnd)
+    if (result)
     {
-        WaitForSingleObject(pState->WrEvt, INFINITE);
-        pState->WrPnd = FALSE;
+        result = GetOverlappedResult(
+                pState->PipeHnd,
+                &pState->WrOvr, 
+                &bytesWritten,
+                TRUE);
     }
-    
-    result = GetOverlappedResult(
-            pState->PipeHnd,
-            &pState->WrOvr, 
-            &bytesWritten,
-            FALSE);
     
     if (! result)
     {
@@ -224,6 +249,8 @@ DbgState_ReadData(
         return FALSE;
     }
     
+    ResetEvent(pState->RdEvt);
+    
     pState->RdOvr.hEvent = pState->RdEvt;
     
     result = ReadFile(
@@ -236,21 +263,18 @@ DbgState_ReadData(
     {
         if (GetLastError() == ERROR_IO_PENDING)
         {
-            pState->RdPnd = TRUE;
+            result = TRUE;
         }
     }
     
-    if (pState->RdPnd)
+    if (result)
     {
-        WaitForSingleObject(pState->RdEvt, INFINITE);
-        pState->RdPnd = FALSE;
+        result = GetOverlappedResult(
+                pState->PipeHnd,
+                &pState->RdOvr, 
+                &bytesRead,
+                TRUE);
     }
-    
-    result = GetOverlappedResult(
-            pState->PipeHnd,
-            &pState->RdOvr, 
-            &bytesRead,
-            FALSE);
     
     if (! result)
     {
@@ -263,13 +287,26 @@ DbgState_ReadData(
     return result;
 }
 
+BOOL
+DbgState_SendImage(
+    _Inout_ DBG_STATE* pState,
+    _In_ DBG_IMG_SPEC* pImage
+    )
+{
+    BOOL result = TRUE;
+    
+    return result;
+}
+
 int
 main(
     int argc,
     char* argv[]
     )
 {
+    BOOL result = TRUE;
     DBG_STATE dbgState = {0};
+    DBG_PROT_HDR dbgHdr = {0};
     const char* pPipeName = "!!!";
     const USHORT pageCount = 0x0201;
     BYTE* pJunk = NULL;
@@ -298,39 +335,60 @@ main(
         fprintf(stdout, "Failed to connect client.\n");
         return 1;
     }
-    fprintf(stdout, "Connection successful, sending header...\n");
     
-    if (! DbgState_SendData(&dbgState, (const BYTE*)("ExOs"), 4))
+    fprintf(stdout, "Connection successful, syncing...\n");
+    
+    for (;;)
     {
-        fprintf(stdout, "Failed to send connect packet.\n");
-        return 1;
+        result = DbgState_ReadData(&dbgState, (BYTE*)&dbgHdr, sizeof(dbgHdr));
+        
+        if (! result)
+        {
+            goto Cleanup;
+        }
+        
+        fprintf(stdout, "%c%c%c%c:%02X:%02X:%04X\n",
+                dbgHdr.Signature[0],
+                dbgHdr.Signature[1],
+                dbgHdr.Signature[2],
+                dbgHdr.Signature[3],
+                dbgHdr.Version,
+                dbgHdr.CmdId,
+                dbgHdr.Meta);
+        
+        if ((dbgHdr.Signature[0] == 'E') &&
+            (dbgHdr.Signature[1] == 'x') &&
+            (dbgHdr.Signature[2] == 'O') &&
+            (dbgHdr.Signature[3] == 's') &&
+            (dbgHdr.Version == 0) &&
+            (dbgHdr.CmdId == 0) &&
+            (dbgHdr.Meta == 0))
+        {
+            break;
+        }
     }
-    fprintf(stdout, "Connection header sent.\n");
     
-    if (! DbgState_SendData(&dbgState, (const BYTE*)&pageCount, 2))
-    {
-        fprintf(stdout, "Sending page count failed.\n");
-        return 1;
-    }
-    fprintf(stdout, "Payload page count send.\n");
+    // Send the boot code.
+    dbgHdr.Signature[0] = 'E';
+    dbgHdr.Signature[1] = 'x';
+    dbgHdr.Signature[2] = 'O';
+    dbgHdr.Signature[3] = 's';
+    dbgHdr.Version = 0;
+    dbgHdr.CmdId = 1;
+    dbgHdr.Meta = 2;        // 2 x 4K pages, 8K total.
     
-    if (! DbgState_SendData(&dbgState, pJunk, 0x08000))
-    {
-        fprintf(stdout, "Payload send failed\n");
-        return 1;
-    }
-    fprintf(stdout, "Finished send. Waiting to ready.\n");
+    result = DbgState_SendData(&dbgState, (BYTE*)&dbgHdr, sizeof(dbgHdr));
     
-    DbgState_ReadData(&dbgState, pJunk, 20);
-    for (;;);
-    
-    fprintf(stdout, "Clean exit\n");
+    fprintf(stdout, "Sent header.\n");
     
 Cleanup:
-    fprintf(stdout, "Cleanup\n");
     
     DbgState_Destroy(&dbgState);
     
+    if (pJunk)
+    {
+        free(pJunk);
+    }
     return 0;
 }
 
