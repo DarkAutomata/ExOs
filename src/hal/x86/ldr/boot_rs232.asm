@@ -273,17 +273,16 @@ inByte:
 ;   cx:     The address offset.
 ;   dl:     The byte to write.
 outByte:
+    push    ax
+    push    cx
     push    dx
+    mov     al, dl
     mov     dx, cx
     add     dx, [ds:comAddress]
     out     dx, al
-    mov     dx, 0xFF00              ; Include a delay.
-
-outByte_0:
-    dec     dx
-    jnz     outByte_0
-    
     pop     dx
+    pop     cx
+    pop     ax
     ret
 
 ; BYTE getComStatus
@@ -298,10 +297,6 @@ getComStatus:
     cmp     al, dl
     je      getComStatus_0
     mov     [ds:state_LastLsr], al
-    
-    push    ax
-    call    printState
-    pop     ax
     
 getComStatus_0:
     
@@ -344,75 +339,9 @@ readByte:
     call    waitComStatus
     mov     cx, COM_REG_DATA_IDX
     call    inByte
-    pop     cx
-    ret
-
-; printState:
-;   Prints the state registers.
-printState:
-    push    cx
-    push    dx
-    
-    mov     cl, 10          ; Reset cursor position
+    mov     cl, al
     call    printChar
-    
-    ; Print Command ID.
-    mov     cx, [ds:protHdr_Id]
-    mov     dx, 16
-    call    printBin
-    
-    ; Print a dash.
-    mov     cl, '-'
-    call    printChar
-    
-    ; Print the Meta.
-    mov     cx, [ds:protHdr_Meta]
-    mov     dx, 16
-    call    printBin
-    
-    ; Print a dash
-    mov     cl, '-'
-    call    printChar
-    
-    ; Print the last LSR.
-    mov     cl, [ds:state_LastLsr]
-    mov     dx, 8
-    call    printBin
-    
-    ; Print the WaitIter.
-    mov     cx, [ds:state_WaitIter]
-    mov     dx, 16
-    
-    pop     dx
-    pop     cx
-    ret
-
-; printBin
-;   Prints an 8 or 16-bit number in binary.
-;   cx:     The value to print.
-;   dx:     The bit count to output.
-printBin:
-    push    ax
-    push    cx
-    push    dx
-    
-    mov     ax, cx                  ; Shift value to ax.
-printBin_0:
-    dec     dx                      ; Decrement print amount.
-    jz      printBin_1              ; Exit when 0.
-    
-    push    ax                      ; Save ax before shifting it.
-    mov     cl, dl                  ; Load cl with the shift amount
-    shr     ax, cl                  ; Shift ax right by current bit index to print.
-    and     ax, 0x0001              ; Mask everything off by the first bit.
-    add     al, '0'                 ; Add '0' so bit set ==> '1', bit clear ==> '0'
-    mov     cl, al                  ; Shift al into cl for calling printChar.
-    call    printChar               ; Call printChar, cl = '0' or '1'.
-    pop     ax                      ; Restore ax.
-    jmp     printBin_0              ; Continue.
-    
-printBin_1:
-    pop     dx
+    mov     al, cl
     pop     cx
     ret
 

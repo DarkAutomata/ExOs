@@ -317,6 +317,7 @@ main(
         fprintf(stdout, "Alloc failed\n");
         return 1;
     }
+    else
     {
         int i;
         
@@ -338,42 +339,11 @@ main(
     
     fprintf(stdout, "Connection successful, syncing...\n");
     
-    for (;;)
-    {
-        result = DbgState_ReadData(&dbgState, (BYTE*)&dbgHdr, sizeof(dbgHdr));
-        
-        if (! result)
-        {
-            goto Cleanup;
-        }
-        
-        fprintf(stdout, "%c%c%c%c:%02X:%02X:%04X\n",
-                dbgHdr.Signature[0],
-                dbgHdr.Signature[1],
-                dbgHdr.Signature[2],
-                dbgHdr.Signature[3],
-                dbgHdr.Version,
-                dbgHdr.CmdId,
-                dbgHdr.Meta);
-        
-        if ((dbgHdr.Signature[0] == 'E') &&
-            (dbgHdr.Signature[1] == 'x') &&
-            (dbgHdr.Signature[2] == 'O') &&
-            (dbgHdr.Signature[3] == 's') &&
-            (dbgHdr.Version == 0) &&
-            (dbgHdr.CmdId == 0) &&
-            (dbgHdr.Meta == 0))
-        {
-            break;
-        }
-    }
-    
     // Send the boot code.
     dbgHdr.Signature[0] = 'E';
     dbgHdr.Signature[1] = 'x';
     dbgHdr.Signature[2] = 'O';
     dbgHdr.Signature[3] = 's';
-    dbgHdr.Version = 0;
     dbgHdr.CmdId = 1;
     dbgHdr.Meta = 2;        // 2 x 4K pages, 8K total.
     
