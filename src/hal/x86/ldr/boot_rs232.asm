@@ -174,85 +174,70 @@ boot:
                 COM_REG_FCR_CLR_TX)
     call    outByte
 
-readBootImage_ReadHdr_0:
-    ; Update the header for reply testing.
-    mov     byte [ds:protHdr_Id], EXOS_DBG_PROT_ID_UPLOAD_0
+    ; Setup header validation.
+    mov     cx, 4
+    mov     bx, protHdr
     
-    ; Just updated the header with the upload command. Verify 6 bytes of the
-    ; header, then read the meta data to get the page count. After that stream
-    ; into memory.
-    mov     cx, 6
-    call    verifyHdr
-    
-    jmp $
-    ; Oops.
-    call    failure
-    
-readBootImage_ReadHdr_1:
-    inc     bx
-    jmp     readBootImage_ReadHdr_0
-    
-readBootImage_ReadImgSize:
-    call    readByte
-    mov     cl, al
-    
-    call    readByte
-    mov     ch, al
-    
-    jmp $
-    ; Initialize location information. Loader starts at 0x20000.
-    mov     ax, BOOT_LOAD_SEG
-    mov     es, ax
-    
-    ; bx contains the base address for writing.
-    mov     bx, 0
-    
-    ; Begin reading data in 4K chunks.
-readBootImage_ReadImg:
+readBootImage_0:
     test    cx, cx
-    jz      runLoader
+    jz      readBootImage_1
+    
+    ; Read a byte, compare against the header.
+    call    readByte
+    sub     al, [ds:bx]
+    jnz     failure
     
     dec     cx
+    inc     bx
+    jmp     readBootImage_0
     
-readBootImage_ReadImg_0:
-    test    bx, 0x0FFF
-    jz      readBootImage_ReadImg_1
-    
+readBootImage_1:
+    ; Read 1 byte, the number of 4K pages.
     call    readByte
-    mov     [es:bx], al
+    
+    ; Start loading at 0x00020000.
+    mov     bx, 0x2000
+    mov     ds, bx
+    mov     bx, 0
+    
+readBootImage_2:
+    ; Loop for each 4K.
+    test    al, al
+    jz      execBootImage
+    
+    ; Decrement the remaining page count and save on stack.
+    dec     al
+    
+    ; Load 4K into cx.
+    mov     cx, 4096
+    
+readBootImage_3:
+    test    cx, cx
+    jz      readBootImage_4
+    
+    ; Read a byte, save it, inc/dec index/counter.
+    push    ax
+    call    readByte
+    mov     [ds:bx], al
+    pop     ax
     
     inc     bx
-    jmp     readBootImage_ReadImg_0
+    dec     cx
+    jmp     readBootImage_3
     
-readBootImage_ReadImg_1:
+readBootImage_4:
+    ; Test for bx == 0.
     test    bx, bx
-    jnz     readBootImage_ReadImg
+    jnz     readBootImage_2
     
-    ; Roll-over detected, update segment.
-    mov     ax, es
-    add     ax, 0x1000
-    mov     es, ax
-    jmp     readBootImage_ReadImg
+    mov     bx, ds
+    add     bx, 0x1000
+    mov     ds, bx
+    xor     bx, bx
+    jmp     readBootImage_2
     
-runLoader:
+execBootImage:
     jmp     $
-
-; syncTicks
-;   Read 8 packets (2 seconds) of data and count timing.
-syncTicks:
-    push    cx
-    push    dx
-    
-    xor     cx, cx
-    mov     dx, cx
-    
-syncTicks_0:
-    inc     cx
-    test    cx, cx
-    jnz     syncTicks_0
-    pop     dx
-    pop     cx
-    ret
 
 ; inByte 
 ; Reads a byte from the configured COM port at offset in cx.
@@ -345,33 +330,6 @@ readByte:
     pop     cx
     ret
 
-; verifyHdr
-; Reads cx bytes from the configured COM port and compares.
-;   cx:     The number of characters to compare.
-verifyHdr:
-    push    bx
-    push    cx
-    
-    xor     ax, ax              ; Clear ax to setup for use.
-    mov     bx, protHdr         ; Start reading the first header byte.
-    
-verifyHdr_0:
-    test    cx, cx              ; Test remaining byte count, exit on 0.
-    jz      verifyHdr_1
-    
-    call    readByte            ; Read a byte.
-    sub     al, [ds:bx]         ; Compare byte read with buffer.
-    jnz     verifyHdr_1
-    
-    inc     bx                  ; Advance compare pointer.
-    dec     cx                  ; Reduce the counter.
-    jmp     verifyHdr_0
-    
-verifyHdr_1:
-    pop     cx
-    pop     bx
-    ret
-
 ; printChar
 ;   cl:     The character to print.
 printChar:
@@ -387,23 +345,26 @@ printChar:
 
 ; Define failure target.
 failure:
-    ; Loop on failure.
+    ; Indicate failure, then hang.
+    mov     al, 8
+    mov     cl, 'X'
+
+failure_0:
+    dec     al
+    call    printChar
+    jnz     failure_0
+    
     jmp     $
 
-; Define protocol data.
-; The header expected before every message.
-currentState:
+; Expected header for comparison.
 protHdr:
     db      'E', 'x', 'O', 's'
-protHdr_Id:
-    dw      0xFFFF
-protHdr_Meta:
-    dw      0x0000
+
+; Various state variables for debugging.
 state_LastLsr:
     db      0x00
 state_WaitIter:
     dw      0x0000
-
 comAddress:
     dw      COM1_PORT
 

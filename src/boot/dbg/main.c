@@ -10,21 +10,17 @@ Usage()
     fprintf(stdout, "exec (CLIENT | SERVER) PIPE_NAME\n");
 }
 
-typedef struct _DBG_PROT_HDR
+typedef struct _BOOT_PROT_HDR
 {
     BYTE Signature[4];      // 'ExOs'
-    USHORT CmdId;           // The protocol command.
-    USHORT Meta;            // Extra data,
-} DBG_PROT_HDR;
+    BYTE PageCount;
+} BOOT_PROT_HDR;
 
-#define EXOS_DBG_PROT_ID_HELLO          0x0000
-#define EXOS_DBG_PROT_ID_UPLOAD_0       0x0001
-
-typedef struct _DBG_IMG_SPEC
+typedef struct _BOOT_IMG_SPEC
 {
     BYTE* pImageData;
     ULONG ImageSize;
-} DBG_IMG_SPEC;
+} BOOT_IMG_SPEC;
 
 typedef struct _DBG_STATE
 {
@@ -74,7 +70,7 @@ DbgState_ReadData(
 BOOL
 DbgState_SendImage(
     _Inout_ DBG_STATE* pState,
-    _In_ DBG_IMG_SPEC* pImage
+    _In_ BOOT_IMG_SPEC* pImage
     );
 
 BOOL
@@ -290,7 +286,7 @@ DbgState_ReadData(
 BOOL
 DbgState_SendImage(
     _Inout_ DBG_STATE* pState,
-    _In_ DBG_IMG_SPEC* pImage
+    _In_ BOOT_IMG_SPEC* pImage
     )
 {
     BOOL result = TRUE;
@@ -306,12 +302,12 @@ main(
 {
     BOOL result = TRUE;
     DBG_STATE dbgState = {0};
-    DBG_PROT_HDR dbgHdr = {0};
+    BOOT_PROT_HDR dbgHdr = {0};
     const char* pPipeName = "!!!";
-    const USHORT pageCount = 0x0201;
     BYTE* pJunk = NULL;
+    int imageSize = 4096*2;
     
-    pJunk = (BYTE*)malloc(sizeof(BYTE) * 0x08000);
+    pJunk = (BYTE*)malloc(sizeof(BYTE) * imageSize);
     if (! pJunk)
     {
         fprintf(stdout, "Alloc failed\n");
@@ -321,7 +317,7 @@ main(
     {
         int i;
         
-        for (i = 0; i < 0x08000; i++)
+        for (i = 0; i < imageSize; i++)
         {
             pJunk[i] = (BYTE)(i & 0xFF);
         }
@@ -344,12 +340,15 @@ main(
     dbgHdr.Signature[1] = 'x';
     dbgHdr.Signature[2] = 'O';
     dbgHdr.Signature[3] = 's';
-    dbgHdr.CmdId = 1;
-    dbgHdr.Meta = 2;        // 2 x 4K pages, 8K total.
+    dbgHdr.PageCount = 2;       // 2 x 4K pages, 8K total.
     
     result = DbgState_SendData(&dbgState, (BYTE*)&dbgHdr, sizeof(dbgHdr));
     
-    fprintf(stdout, "Sent header.\n");
+    fprintf(stdout, "Send header: %d\n", result);
+    
+    result = DbgState_SendData(&dbgState, pJunk, imageSize);
+    
+    fprintf(stdout, "Send image: %d\n", result);
     
 Cleanup:
     
