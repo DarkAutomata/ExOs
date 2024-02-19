@@ -1,25 +1,39 @@
 #! /bin/bash
 
+# Get the path of the script, the WSL folder, and the command name.
 confDir0=$(dirname $0)
-confDir1="${confDir0//\/mnt\/c/c\:}"
-confDir="${confDir1//\//\\}"
+confDir=${confDir0//\//\\}
 
-AllArgs=${confDir}\\win32.exe.cmd
+wslRoot0=$1/${PWD}
+wslRoot=${wslRoot0//\//\\}
+
+cmdName=$2
+
+# Shift out the handled values.
+shift 2
+
+#echo Conf Dir: ${confDir}
+#echo WSL dir:  ${wslRoot}
+#echo CMD Name: ${cmdName}
+
+AllArgs="${wslRoot}\\${confDir}\\win32.exe.cmd ${wslRoot} ${cmdName}"
 
 for arg in "$@"
 do
-    # Keep the first character (if it's a slash, it's a parameter and not a
-    # path). Add it back at the end.
-    procArgChar0=${arg:0:1}
-    procArg0=${arg:1}
+    char0=${arg:0:1}
     
-    # echo 0: $arg
-    procArg1="${procArg0//\/mnt\/c/c\:}"
-    procArg2="${procArg1//\//\\}"
+    if [[ "${char0}"=="/" ]]; then
+        # This is an argument.
+        procArg=${arg}
+    else
+        # This is a path.
+        procArg0=${wslRoot}/${arg}
+        procArg=${procArg0//\//\\}
+    fi
     
-    # Recombine processed with first letter save above.
-    AllArgs="${AllArgs} ${procArgChar0}${procArg2}"
+    # Recombine the processed elements.
+    AllArgs="${AllArgs} ${procArg}"
 done
 
-cmd.exe /C @$AllArgs
+cmd.exe /C $AllArgs
 
