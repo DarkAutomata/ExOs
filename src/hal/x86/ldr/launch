@@ -1,4 +1,5 @@
 #! /bin/bash
 
-cmd.exe /C c:\\tmp\\ExOs\\launch.cmd
+cd ../vhdimage
+cmd.exe /C launch.cmd
 

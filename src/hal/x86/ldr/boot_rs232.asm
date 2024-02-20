@@ -63,7 +63,7 @@
 %define COM_REG_LSR_E_FRM   0x08        ; Framing Error.
 %define COM_REG_LSR_I_BRK   0x10        ; Break Indicator.
 %define COM_REG_LSR_S_TXH   0x20        ; Transmitter Holding Indicator.
-%define COM_REG_LSR_s_EDH   0x40        ; Transmitter Empty Indicator.
+%define COM_REG_LSR_S_TXE   0x40        ; Transmitter Empty Indicator.
 %define COM_REG_LSR_E_FFO   0x80        ; FIFO Error.
 
 ; Modem Status Register
@@ -75,6 +75,10 @@
 
 %define BOOT_STACK_SEG      0x1000
 %define BOOT_STACK_BASE     0xFF00
+
+%define BOOT_LOAD_SEG       0x2000
+
+%define EXOS_DBG_PROT_ID_UPLOAD_0   0x0001  ; Meta = page count to read.
 
 struc BOOT_DATA
     .DriveNumber:   resw    1       ; The BIOS provided drive number.
@@ -100,7 +104,7 @@ bits 16
 init:
     ; Clear interrupts while relocating code to 0x0600.
     cli
-
+    
     ; Clear ax and then load into all the segment registers to set known
     ; state.
     xor     ax, ax
@@ -118,9 +122,12 @@ init:
     ; jmp to new code.
     jmp 0:boot
 
+timeCounter:
+    dw      0
+
 boot:
     ; Save the drive number from the BIOS.
-    mov     [BOOT_DATA_BASE + BOOT_DATA.DriveNumber], dl
+    mov     [ds:BOOT_DATA_BASE + BOOT_DATA.DriveNumber], dl
     
     ; Setup the stack pointer.
     mov     ax, BOOT_STACK_BASE
@@ -134,202 +141,235 @@ boot:
     
     ; Configure COM for 8N1 @ 115200 baud, then wait for boot upload.
     ; Disable interrupts.
-    mov     dx, COM_REG_IER_IDX
-    mov     al, 0
+    mov     cx, COM_REG_IER_IDX
+    mov     dl, 0
     call    outByte
     
     ; Set DLAB mode.
-    mov     dx, COM_REG_LCR_IDX
-    mov     al, (\
+    mov     cx, COM_REG_LCR_IDX
+    mov     dl, (\
                 COM_REG_LCR_DLAB | \
                 COM_REG_LCR_8N1)
     call    outByte
     
     ; Divisor = 1, 115200 baud.
-    mov     dx, COM_REG_DLAB_0_IDX
-    mov     al, 1
+    mov     cx, COM_REG_DLAB_0_IDX
+    mov     dl, 1
     call    outByte
     
-    mov     dx, COM_REG_DLAB_1_IDX
-    mov     al, 0
+    mov     cx, COM_REG_DLAB_1_IDX
+    mov     dl, 0
     call    outByte
     
     ; Clear DLAB, set 8N1.
-    mov     dx, COM_REG_LCR_IDX
-    mov     al, COM_REG_LCR_8N1
+    mov     cx, COM_REG_LCR_IDX
+    mov     dl, COM_REG_LCR_8N1
     call    outByte
     
     ; Enable and clear FIFOs for TX and RX. Set them to 1 byte.
-    mov     dx, COM_REG_FCR_IDX
-    mov     al, (\
+    mov     cx, COM_REG_FCR_IDX
+    mov     dl, (\
                 COM_REG_FCR_EN | \
                 COM_REG_FCR_CLR_RX | \
                 COM_REG_FCR_CLR_TX)
     call    outByte
 
-readBootImage:
-    ; Read the boot image payload.
-    call    syncRemote
+    ; Setup header validation.
+    mov     cx, 4
+    mov     bx, protHdr
     
-    jmp     readBootImage
-
-inByte:
-    add     dx, [comAddress]
-    in      al, dx
-    ret
-
-outByte:
-    add     dx, [comAddress]
-    out     dx, al
-    ret
-
-; delay
-;   Executes a short delay.
-delay:
-    push    bx
-    push    cx
+readBootImage_0:
+    test    cx, cx
+    jz      readBootImage_1
     
-    mov     cx, 0x0010
-    
-delay_Loop0:
-    mov     bx, 0xFFFF
-    
-delay_Loop1:
-    dec     bx
-    jnz     delay_Loop1
+    ; Read a byte, compare against the header.
+    call    readByte
+    sub     al, [ds:bx]
+    jnz     failure
     
     dec     cx
-    jnz     delay_Loop0
+    inc     bx
+    jmp     readBootImage_0
     
-    pop     cx
-    pop     bx
-    ret
+readBootImage_1:
+    ; Read 1 byte, the number of 4K pages.
+    call    readByte
     
-; syncRemote
-;   Waits until connection established by remote host.
-syncRemote:
+    ; Start loading at 0x00020000.
+    mov     bx, 0x2000
+    mov     ds, bx
+    mov     bx, 0
     
-    ; Infinite loop looking for data to load.
-syncRemote_ReadLoop:
-    ; Setup alternating wait status.
-    inc     cx
+readBootImage_2:
+    ; Loop for each 4K.
+    test    al, al
+    jz      execBootImage
+    
+    ; Decrement the remaining page count and save on stack.
+    dec     al
+    
+    ; Load 4K into cx.
+    mov     cx, 4096
+    
+readBootImage_3:
+    test    cx, cx
+    jz      readBootImage_4
+    
+    ; Read a byte, save it, inc/dec index/counter.
+    push    ax
+    call    readByte
+    mov     [ds:bx], al
+    pop     ax
+    
+    inc     bx
+    dec     cx
+    jmp     readBootImage_3
+    
+readBootImage_4:
+    ; Test for bx == 0.
+    test    bx, bx
+    jnz     readBootImage_2
+    
+    mov     bx, ds
+    add     bx, 0x1000
+    mov     ds, bx
+    xor     bx, bx
+    jmp     readBootImage_2
+    
+execBootImage:
+    jmp     $
+
+; inByte 
+; Reads a byte from the configured COM port at offset in cx.
+;   cx:     Offset of configured COM port to read.
+inByte:
+    push    dx
     
     mov     dx, cx
-    and     dx, 0x0003
-    shl     dx, 1
     
-    add     dx, strStatusPending
-
-    call    printString
-    
-    mov     dx, COM_REG_LSR_IDX
-    call    inByte
-    
-    test    al, COM_REG_LSR_DRDY
-    jnz     syncRemote_ReadHdr
-    
-    call    delay
-    
-    mov     dx, strBackspace
-    call    printString
-    
-    ; Repeat, until connection.
-    jmp     syncRemote_ReadLoop
-    
-syncRemote_ReadHdr:
-    ; Read image.
-    jmp $
-
-; sendByte:
-;   ah = Byte to send.
-sendByte:
-    push    cx
-    
-    mov     dx, COM_REG_LSR_IDX
-    add     dx, [comAddress]
-    
-    mov     cx, 1000
-    
-sendByte_GetStatus:
-    dec     cx
-    jz      sendByte_Exit
-    
+    add     dx, [ds:comAddress]
     in      al, dx
-    test    al, COM_REG_LSR_S_TXH
-    jz      sendByte_GetStatus
     
-    ; Prepare to send bte.
-    mov     al, ah
-    out     dx, al
+    pop     dx
+    ret
 
-sendByte_Exit:
+; outByte
+; Writes a byte to the configured COM port at the address offset.
+;   cx:     The address offset.
+;   dl:     The byte to write.
+outByte:
+    push    ax
+    push    cx
+    push    dx
+    mov     al, dl
+    mov     dx, cx
+    add     dx, [ds:comAddress]
+    out     dx, al
+    pop     dx
+    pop     cx
+    pop     ax
+    ret
+
+; BYTE getComStatus
+;   Get the current COM LSR.
+getComStatus:
+    push    cx
+    push    dx
+    
+    mov     cx, COM_REG_LSR_IDX
+    call    inByte
+    mov     dl, [ds:state_LastLsr]
+    cmp     al, dl
+    je      getComStatus_0
+    mov     [ds:state_LastLsr], al
+    
+getComStatus_0:
+    
+    pop     dx
     pop     cx
     ret
 
-; sendBytes:
-;   bx = Location pointer.
-sendBytes:
-    ; Return when send value is 0.
-    mov     ah, [bx]
-    inc     bx
-    test    ah, ah
-    jz      sendBytes_Exit
+; waitComStatus
+;   Wait for a status bits to be set on the COM port.
+;   cl:     Flags to wait on.
+waitComStatus:
+    push    bx
+    push    cx
+    push    dx
     
-    call    sendByte
-    jmp     sendBytes
+    mov     word [ds:state_WaitIter], 0
     
-sendBytes_Exit:
+waitComStatus_0:
+    call    getComStatus
+    
+    and     al, cl
+    jnz     waitComStatus_End
+    
+    inc     word [ds:state_WaitIter]
+    
+    ; Repeat, until flags set.
+    jmp     waitComStatus_0
+    
+waitComStatus_End:
+    pop     dx
+    pop     cx
+    pop     bx
     ret
 
-; printString:
-;   dx = String to print.
-printString:
+; BYTE readByte:
+;   Reads a data byte from the configured COM port.
+readByte:
+    push    cx
+    mov     cx, COM_REG_LSR_DRDY
+    call    waitComStatus
+    mov     cx, COM_REG_DATA_IDX
+    call    inByte
+    mov     cl, al
+    call    printChar
+    mov     al, cl
+    pop     cx
+    ret
+
+; printChar
+;   cl:     The character to print.
+printChar:
     push    ax
     push    bx
-    
-    mov     bx, dx
-    
-printString_Loop:
-    mov     al, [bx]
-    test    al, al
-    jz      printString_Exit
-    
-    inc     bx
-    mov     ah, 0x0E
-    
-    push    bx
     mov     bx, 0
+    mov     ah, 0x0E
+    mov     al, cl
     int     0x10
-    pop     bx
-
-    jmp     printString_Loop
-    
-printString_Exit:
     pop     bx
     pop     ax
     ret
 
 ; Define failure target.
 failure:
-    ; Loop on failure.
+    ; Indicate failure, then hang.
+    mov     al, 8
+    mov     cl, 'X'
+
+failure_0:
+    dec     al
+    call    printChar
+    jnz     failure_0
+    
     jmp     $
 
-; Define protocol data.
-; The header expected before every message.
+; Expected header for comparison.
 protHdr:
-    db      'E', 'x', 'O', 's', 0
+    db      'E', 'x', 'O', 's'
 
-strBackspace:
-    db      8, 0
-
-strStatusPending:
-    db      '-',  0
-    db      '\',  0
-    db      '|',  0
-    db      '/',  0
-
+; Various state variables for debugging.
+state_LastLsr:
+    db      0x00
+state_WaitIter:
+    dw      0x0000
 comAddress:
     dw      COM1_PORT
+
+timerTicks:
+    dw      0x0000
 
 ; Pad until partitio table.
 times 0x1BE-($-$$) nop

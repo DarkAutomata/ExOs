@@ -10,6 +10,18 @@ Usage()
     fprintf(stdout, "exec (CLIENT | SERVER) PIPE_NAME\n");
 }
 
+typedef struct _BOOT_PROT_HDR
+{
+    BYTE Signature[4];      // 'ExOs'
+    BYTE PageCount;
+} BOOT_PROT_HDR;
+
+typedef struct _BOOT_IMG_SPEC
+{
+    BYTE* pImageData;
+    ULONG ImageSize;
+} BOOT_IMG_SPEC;
+
 typedef struct _DBG_STATE
 {
     HANDLE PipeHnd;
@@ -17,8 +29,6 @@ typedef struct _DBG_STATE
     HANDLE WrEvt;
     
     BOOL PipeRdy;
-    BOOL RdPnd;
-    BOOL WrPnd;
     
     OVERLAPPED RdOvr;
     OVERLAPPED WrOvr;
@@ -58,6 +68,12 @@ DbgState_ReadData(
     );
 
 BOOL
+DbgState_SendImage(
+    _Inout_ DBG_STATE* pState,
+    _In_ BOOT_IMG_SPEC* pImage
+    );
+
+BOOL
 DbgState_Create(
     _Out_ DBG_STATE* pState
     )
@@ -69,8 +85,8 @@ DbgState_Create(
     pState->PipeHnd = INVALID_HANDLE_VALUE;
     
     // Create everything, check everything.
-    pState->RdEvt = CreateEventA(NULL, FALSE, FALSE, NULL);
-    pState->WrEvt = CreateEventA(NULL, FALSE, FALSE, NULL);
+    pState->RdEvt = CreateEventA(NULL, TRUE, FALSE, NULL);
+    pState->WrEvt = CreateEventA(NULL, TRUE, FALSE, NULL);
     
     if ((pState->RdEvt == NULL) ||
         (pState->WrEvt == NULL))
@@ -119,6 +135,8 @@ DbgState_ClientConn(
     {
         DWORD lastError;
         
+        fprintf(stdout, "ClientConn: [%d]%s...\n", tryCount, pPipeName);
+        
         pState->PipeHnd = CreateFileA(
                 pPipeName,
                 (GENERIC_READ | GENERIC_WRITE),
@@ -148,6 +166,14 @@ DbgState_ClientConn(
         }
     }
     
+    if (! pState->PipeRdy)
+    {
+        fprintf(stdout, "ClientConn Failed\n");
+        goto Cleanup;
+    }
+    
+Cleanup:
+    
     return pState->PipeRdy;
 }
 
@@ -166,6 +192,8 @@ DbgState_SendData(
         return FALSE;
     }
     
+    ResetEvent(pState->WrEvt);
+    
     pState->WrOvr.hEvent = pState->WrEvt;
     
     result = WriteFile(
@@ -178,21 +206,18 @@ DbgState_SendData(
     {
         if (GetLastError() == ERROR_IO_PENDING)
         {
-            pState->WrPnd = TRUE;
+            result = TRUE;
         }
     }
     
-    if (pState->WrPnd)
+    if (result)
     {
-        WaitForSingleObject(pState->WrEvt, INFINITE);
-        pState->WrPnd = FALSE;
+        result = GetOverlappedResult(
+                pState->PipeHnd,
+                &pState->WrOvr, 
+                &bytesWritten,
+                TRUE);
     }
-    
-    result = GetOverlappedResult(
-            pState->PipeHnd,
-            &pState->WrOvr, 
-            &bytesWritten,
-            FALSE);
     
     if (! result)
     {
@@ -220,6 +245,8 @@ DbgState_ReadData(
         return FALSE;
     }
     
+    ResetEvent(pState->RdEvt);
+    
     pState->RdOvr.hEvent = pState->RdEvt;
     
     result = ReadFile(
@@ -232,21 +259,18 @@ DbgState_ReadData(
     {
         if (GetLastError() == ERROR_IO_PENDING)
         {
-            pState->RdPnd = TRUE;
+            result = TRUE;
         }
     }
     
-    if (pState->RdPnd)
+    if (result)
     {
-        WaitForSingleObject(pState->RdEvt, INFINITE);
-        pState->RdPnd = FALSE;
+        result = GetOverlappedResult(
+                pState->PipeHnd,
+                &pState->RdOvr, 
+                &bytesRead,
+                TRUE);
     }
-    
-    result = GetOverlappedResult(
-            pState->PipeHnd,
-            &pState->RdOvr, 
-            &bytesRead,
-            FALSE);
     
     if (! result)
     {
@@ -259,16 +283,49 @@ DbgState_ReadData(
     return result;
 }
 
+BOOL
+DbgState_SendImage(
+    _Inout_ DBG_STATE* pState,
+    _In_ BOOT_IMG_SPEC* pImage
+    )
+{
+    BOOL result = TRUE;
+    
+    return result;
+}
+
 int
 main(
     int argc,
     char* argv[]
     )
 {
+    BOOL result = TRUE;
     DBG_STATE dbgState = {0};
+    BOOT_PROT_HDR dbgHdr = {0};
     const char* pPipeName = "!!!";
+    BYTE* pJunk = NULL;
+    int imageSize = 4096*2;
+    
+    pJunk = (BYTE*)malloc(sizeof(BYTE) * imageSize);
+    if (! pJunk)
+    {
+        fprintf(stdout, "Alloc failed\n");
+        return 1;
+    }
+    else
+    {
+        int i;
+        
+        for (i = 0; i < imageSize; i++)
+        {
+            pJunk[i] = (BYTE)(i & 0xFF);
+        }
+    }
     
     pPipeName = argv[1];
+    
+    fprintf(stdout, "Attempting connection...\n");
     
     if (! DbgState_ClientConn(&dbgState, pPipeName))
     {
@@ -276,15 +333,31 @@ main(
         return 1;
     }
     
-    if (! DbgState_SendData(&dbgState, (const BYTE*)("ExOs"), 4))
-    {
-        fprintf(stdout, "Failed to send connect packet.\n");
-        return 1;
-    }
+    fprintf(stdout, "Connection successful, syncing...\n");
+    
+    // Send the boot code.
+    dbgHdr.Signature[0] = 'E';
+    dbgHdr.Signature[1] = 'x';
+    dbgHdr.Signature[2] = 'O';
+    dbgHdr.Signature[3] = 's';
+    dbgHdr.PageCount = 2;       // 2 x 4K pages, 8K total.
+    
+    result = DbgState_SendData(&dbgState, (BYTE*)&dbgHdr, sizeof(dbgHdr));
+    
+    fprintf(stdout, "Send header: %d\n", result);
+    
+    result = DbgState_SendData(&dbgState, pJunk, imageSize);
+    
+    fprintf(stdout, "Send image: %d\n", result);
     
 Cleanup:
+    
     DbgState_Destroy(&dbgState);
     
+    if (pJunk)
+    {
+        free(pJunk);
+    }
     return 0;
 }
 

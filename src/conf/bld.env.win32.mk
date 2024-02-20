@@ -26,10 +26,10 @@ $(BLD_OUT)/%.obj: %.c
 	$(BLD_TOOL_CL) /nologo /Zi /c $< /Fo: "$(BLD_OUT)/" /Fd: "$(BLD_TARGET).bld.pdb"
 
 $(BLD_OUT)/%.exe: $(BLD_OBJ_TARGETS)
-	$(BLD_TOOL_LINK) /NOLOGO $(BLD_OBJ_TARGETS) "/OUT:$@" "/PDB:$(@:.exe=.pdb)"
+	$(BLD_TOOL_LINK) /NOLOGO $(BLD_OBJ_TARGETS) "/OUT:$@" /DEBUG:FULL "/PDB:$(@:.exe=.pdb)"
 
 $(BLD_OUT)/%.dll: $(BLD_OBJ_TARGETS)
-	$(BLD_TOOL_LINK) /NOLOGO TODO %(BLD_OBJ_TARGERS) "/OUT:$@" "/PDB:$(@:.dll=.pdb)"
+	$(BLD_TOOL_LINK) /NOLOGO TODO %(BLD_OBJ_TARGERS) "/OUT:$@" /DEBUG:FULL "/PDB:$(@:.dll=.pdb)"
 
 # 
 # Define standard processing for the build type using the following known
