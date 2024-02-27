@@ -10,11 +10,13 @@ Usage()
     fprintf(stdout, "exec (CLIENT | SERVER) PIPE_NAME\n");
 }
 
+#pragma pack(push, 1)
 typedef struct _BOOT_PROT_HDR
 {
     BYTE Signature[4];      // 'ExOs'
     BYTE PageCount;
 } BOOT_PROT_HDR;
+#pragma pack(pop)
 
 typedef struct _BOOT_IMG_SPEC
 {
@@ -302,13 +304,13 @@ main(
 {
     BOOL result = TRUE;
     DBG_STATE dbgState = {0};
-    BOOT_PROT_HDR dbgHdr = {0};
+    
+    BOOT_PROT_HDR* pDbgHdr = NULL;
     const char* pPipeName = "!!!";
-    BYTE* pJunk = NULL;
     int imageSize = 4096*2;
     
-    pJunk = (BYTE*)malloc(sizeof(BYTE) * imageSize);
-    if (! pJunk)
+    pDbgHdr = (BOOT_PROT_HDR*)malloc(sizeof(*pDbgHdr) + imageSize);
+    if (! pDbgHdr)
     {
         fprintf(stdout, "Alloc failed\n");
         return 1;
@@ -316,10 +318,11 @@ main(
     else
     {
         int i;
+        BYTE* pData = (BYTE*)&pDbgHdr[1];
         
         for (i = 0; i < imageSize; i++)
         {
-            pJunk[i] = (BYTE)(i & 0xFF);
+            pData[i] = (BYTE)(i & 0xFF);
         }
     }
     
@@ -336,27 +339,23 @@ main(
     fprintf(stdout, "Connection successful, syncing...\n");
     
     // Send the boot code.
-    dbgHdr.Signature[0] = 'E';
-    dbgHdr.Signature[1] = 'x';
-    dbgHdr.Signature[2] = 'O';
-    dbgHdr.Signature[3] = 's';
-    dbgHdr.PageCount = 2;       // 2 x 4K pages, 8K total.
+    pDbgHdr->Signature[0] = 'E';
+    pDbgHdr->Signature[1] = 'x';
+    pDbgHdr->Signature[2] = 'O';
+    pDbgHdr->Signature[3] = 's';
+    pDbgHdr->PageCount = 2;     // 2 x 4K pages, 8K total.
     
-    result = DbgState_SendData(&dbgState, (BYTE*)&dbgHdr, sizeof(dbgHdr));
+    result = DbgState_SendData(&dbgState, (BYTE*)pDbgHdr, sizeof(*pDbgHdr) + imageSize);
     
-    fprintf(stdout, "Send header: %d\n", result);
-    
-    result = DbgState_SendData(&dbgState, pJunk, imageSize);
-    
-    fprintf(stdout, "Send image: %d\n", result);
+    fprintf(stdout, "Sent header: %d\n", result);
     
 Cleanup:
     
     DbgState_Destroy(&dbgState);
     
-    if (pJunk)
+    if (pDbgHdr)
     {
-        free(pJunk);
+        free(pDbgHdr);
     }
     return 0;
 }

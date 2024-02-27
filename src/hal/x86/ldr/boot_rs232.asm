@@ -196,7 +196,7 @@ readBootImage_1:
     call    readByte
     
     ; Start loading at 0x00020000.
-    mov     bx, 0x2000
+    mov     bx, BOOT_LOAD_SEG 
     mov     ds, bx
     mov     bx, 0
     
@@ -207,6 +207,7 @@ readBootImage_2:
     
     ; Decrement the remaining page count and save on stack.
     dec     al
+    push    ax
     
     ; Load 4K into cx.
     mov     cx, 4096
@@ -216,16 +217,18 @@ readBootImage_3:
     jz      readBootImage_4
     
     ; Read a byte, save it, inc/dec index/counter.
-    push    ax
     call    readByte
+    jmp $
     mov     [ds:bx], al
-    pop     ax
     
     inc     bx
     dec     cx
     jmp     readBootImage_3
     
 readBootImage_4:
+    ; Restore page count.
+    pop     ax
+    
     ; Test for bx == 0.
     test    bx, bx
     jnz     readBootImage_2
@@ -278,12 +281,7 @@ getComStatus:
     
     mov     cx, COM_REG_LSR_IDX
     call    inByte
-    mov     dl, [ds:state_LastLsr]
-    cmp     al, dl
-    je      getComStatus_0
     mov     [ds:state_LastLsr], al
-    
-getComStatus_0:
     
     pop     dx
     pop     cx
